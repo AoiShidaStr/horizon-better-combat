@@ -1,0 +1,16 @@
+# Combat Combos & Roll ("better_combat"), a native trait mod
+# (docs/native-mods.md, "Trait mods").
+#
+# The launcher builds `api/` into the game and calls its `hooks()`. A trait mod
+# only: no injections, so no Horizon source line is patched.
+# Clean-room: original code, no upstream code or assets; see NOTICE.md.
+[mod]
+id = "better_combat"
+version = "0.1.0"
+
+# The Horizon revision this bundle was written and checked against.
+[compatibility]
+horizon_revision = "a85af177a82504f357ff10d5d40d0b7230e2ac32"
+
+[api]
+path = "api"
