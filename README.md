@@ -7,7 +7,7 @@ clean-room port of the *behaviour* of Better Combat + Combat Roll to
 - Mod id: `better_combat`
 - Kind: **native mod** (`.hnmod`, a trait mod — no content mod, no mixin injection)
 - Side: **both** — one bundle, the server half and the client half of the same package
-- Built against Horizon commit `a85af177a82504f357ff10d5d40d0b7230e2ac32` (hook points 415)
+- Built against Horizon commit `a85af177a82504f357ff10d5d40d0b7230e2ac32` (hook API 415)
 
 ## Why a clean-room rewrite
 
@@ -27,12 +27,12 @@ MIT (`LICENSE`); see `NOTICE.md`.
   attack cooldown and death handling keep working. A pause of 25 ticks or a weapon change starts
   the combo over; two clicks in one tick count once.
 - **Dodge roll**, server-authoritative: the client only asks (`better_combat:roll`), the server
-  checks the player's state and cooldown (5 s), opens 8 ticks in which attacks, arrows and blasts
+  checks the player's state and cooldown (4 s, 80 ticks), opens 8 ticks in which attacks, arrows and blasts
   miss them (`living_incoming_damage`, with a list of what a roll must *not* dodge: fall, fire,
   lava, hunger, the void, `/kill`…), and answers. Only on a grant does the client push its own
   player (`Host::push_player`, the prediction path), play a sweep of air, and start its wait.
 - **Client half**: a rebindable key (default `R`, listed in Options > Mods), `/roll`, the combo
-  pips above the hotbar and a short refusal line ("Roll cooling down", "Cannot roll in the air").
+  pips above the hotbar and a refusal line ("Roll cooling down", "Cannot roll in the air").
 - **Protocol** (`api/src/net.rs`): version byte + exact length on every message, both halves
   validating what they receive; 15 unit tests over the rules and the wire format
   (`cargo test -p mod-better_combat`).
@@ -52,6 +52,12 @@ MIT (`LICENSE`); see `NOTICE.md`.
 - **No hunger cost, no water/vehicle refusal** on a roll: no helper reads a player's food level,
   their vehicle or whether they are in water, so a roll works while swimming or riding and costs
   nothing. The checks that do run: alive, not a spectator, on the ground, not flying, cooldown.
+- **PvP is not scaled.** `living_incoming_damage_v2` only fires for a player's melee, sweep and
+  spear hits on a mob; a hit on another player keeps vanilla's damage, so the combo's multiplier
+  applies to mobs only.
+- **The HUD is approximate.** A combo pip row is drawn only from the combo's second step (`index
+  0` doubles as the "combo is over" message that hides the pips), and the refusal line stays on
+  screen until the next granted roll instead of fading on its own: no client tick hook is used.
 - **Range and attack speed are the game's.** Weapon ranges (`range_bonus` upstream) and attack
   cooldown cannot be read or changed through the API, so a claymore has no extra reach and a
   dagger is not faster — only the combo's multipliers differ per weapon.
