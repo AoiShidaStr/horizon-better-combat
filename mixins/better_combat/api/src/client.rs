@@ -89,7 +89,7 @@ impl Client {
                 // The push the server granted, added to the player's own
                 // velocity as the client moves itself (vanilla's prediction).
                 host.push_player([ok.dir[0] * ok.speed, 0.0, ok.dir[1] * ok.speed]);
-                let at = host.client_state().map_or([0.0; 3], |s| s.eye_position);
+                let at = host.client_state().and_then(|s| s.eye_position).unwrap_or([0.0; 3]);
                 host.play_local_sound(ROLL_SOUND, at, 0.6, 1.6, 0);
             }
             net::ROLL_NO => {
