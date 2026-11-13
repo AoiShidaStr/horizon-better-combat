@@ -2,3 +2,4 @@
 target/
 .freebuff-task.md
 __pycache__/
+dist/

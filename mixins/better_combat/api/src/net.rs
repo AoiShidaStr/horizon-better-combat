@@ -5,10 +5,8 @@
 
 pub const VERSION: u8 = 1;
 
-/// Client to server: "I swung at something that is not a block". No payload
-/// beyond the version: the server works the swing out from its own state.
-pub const ATTACK: &str = "better_combat:attack";
-/// Client to server: "I want to roll this way" (a horizontal direction).
+/// Client to server: "I want to roll this way" (a horizontal direction; zero
+/// means "where I face").
 pub const ROLL: &str = "better_combat:roll";
 /// Server to client: the combo step that was just used.
 pub const COMBO: &str = "better_combat:combo";
@@ -16,14 +14,6 @@ pub const COMBO: &str = "better_combat:combo";
 pub const ROLL_OK: &str = "better_combat:roll_ok";
 /// Server to client: the roll is refused.
 pub const ROLL_NO: &str = "better_combat:roll_no";
-
-pub fn encode_attack() -> Vec<u8> {
-    vec![VERSION]
-}
-
-pub fn decode_attack(data: &[u8]) -> Option<()> {
-    (data == [VERSION]).then_some(())
-}
 
 pub fn encode_roll(dx: f32, dz: f32) -> Vec<u8> {
     let mut out = vec![VERSION];
@@ -49,22 +39,21 @@ pub fn decode_roll(data: &[u8]) -> Option<(f32, f32)> {
     Some((f32_at(data, 1)?, f32_at(data, 5)?))
 }
 
-/// A combo step: its index, the combo's length, and how many extra targets
-/// the swing hit.
+/// A combo step: its index and the combo's length. `index` 0 with `len` 1 is
+/// also what a combo that ran out reports, which hides the client's pips.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ComboMsg {
     pub index: u8,
     pub len: u8,
-    pub hits: u8,
 }
 
 pub fn encode_combo(m: ComboMsg) -> Vec<u8> {
-    vec![VERSION, m.index, m.len, m.hits]
+    vec![VERSION, m.index, m.len]
 }
 
 pub fn decode_combo(data: &[u8]) -> Option<ComboMsg> {
     match data {
-        &[VERSION, index, len, hits] if len > 0 && index < len => Some(ComboMsg { index, len, hits }),
+        &[VERSION, index, len] if len > 0 && index < len => Some(ComboMsg { index, len }),
         _ => None,
     }
 }
@@ -127,20 +116,12 @@ mod tests {
 
     #[test]
     fn channels_are_valid_names() {
-        for ch in [ATTACK, ROLL, COMBO, ROLL_OK, ROLL_NO] {
+        for ch in [ROLL, COMBO, ROLL_OK, ROLL_NO] {
             let (id, name) = ch.split_once(':').unwrap();
             assert_eq!(id, "better_combat");
             assert!(!name.is_empty() && name.len() <= 64);
-            assert!(name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_./-".contains(&b)));
+            assert!(name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-/".contains(&b)));
         }
-    }
-
-    #[test]
-    fn attack_round_trip_and_garbage() {
-        assert_eq!(decode_attack(&encode_attack()), Some(()));
-        assert_eq!(decode_attack(&[]), None);
-        assert_eq!(decode_attack(&[VERSION + 1]), None);
-        assert_eq!(decode_attack(&[VERSION, 0]), None);
     }
 
     #[test]
@@ -159,11 +140,12 @@ mod tests {
 
     #[test]
     fn combo_round_trip_and_garbage() {
-        let m = ComboMsg { index: 2, len: 3, hits: 4 };
+        let m = ComboMsg { index: 2, len: 3 };
         assert_eq!(decode_combo(&encode_combo(m)), Some(m));
-        assert_eq!(decode_combo(&[VERSION, 3, 3, 0]), None);
-        assert_eq!(decode_combo(&[VERSION, 0, 0, 0]), None);
-        assert_eq!(decode_combo(&[VERSION, 0, 1]), None);
+        assert_eq!(decode_combo(&encode_combo(ComboMsg { index: 0, len: 1 })), Some(ComboMsg { index: 0, len: 1 }));
+        assert_eq!(decode_combo(&[VERSION, 3, 3]), None);
+        assert_eq!(decode_combo(&[VERSION, 0, 0]), None);
+        assert_eq!(decode_combo(&[VERSION, 0]), None);
     }
 
     #[test]
