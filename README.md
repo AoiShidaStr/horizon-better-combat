@@ -22,17 +22,31 @@ MIT (`LICENSE`); see `NOTICE.md`.
   (`attack_entity`), reads the item actually in their hand and advances that weapon's combo.
   Ten profiles (`api/src/weapons.rs`): sword, claymore, dagger, katana, axe, mace, polearm,
   scythe, tool, fist — each with its own sequence of damage multipliers (e.g. sword
-  1.0 / 1.0 / 1.2, axe 1.0 / 1.25, dagger 0.9 / 0.9 / 1.2). The step multiplies the damage of the
-  hit the player made (`living_incoming_damage_v2`), so armour, enchantments, the game's own
-  attack cooldown and death handling keep working. A pause of 25 ticks or a weapon change starts
-  the combo over; two clicks in one tick count once.
-- **Dodge roll**, server-authoritative: the client only asks (`better_combat:roll`), the server
-  checks the player's state and cooldown (4 s, 80 ticks), opens 8 ticks in which attacks, arrows and blasts
-  miss them (`living_incoming_damage`, with a list of what a roll must *not* dodge: fall, fire,
-  lava, hunger, the void, `/kill`…), and answers. Only on a grant does the client push its own
-  player (`Host::push_player`, the prediction path), play a sweep of air, and start its wait.
+  1.0 / 1.0 / 1.2, axe 1.0 / 1.25, dagger 0.9 / 0.9 / 1.2), arc width and reach. The step
+  multiplies the damage of the hit the player made (`living_incoming_damage_v2`), so armour,
+  enchantments, the game's own attack cooldown and death handling keep working. A pause of 25
+  ticks or a weapon change starts the combo over; two clicks in one tick count once. An empty
+  hand has the fist's own short combo.
+- **The swing arc really hits.** After the clicked target is scaled, the server lists what
+  stands around the player (`Host::entities_in`), keeps the living things inside the weapon's
+  reach and inside its arc (`core::in_arc`), with line of sight, and hurts each for a share of
+  the hit (`Host::hurt_entity`, `SWEEP_SHARE` = 0.6) with the sweep particle and sound. An item
+  in the game's `minecraft:swords` tag is left to vanilla's own sweep, which the mod only
+  scales to the combo's multiplier — so nothing is ever hit twice. Other players are not swept:
+  a duel is one target, and `living_incoming_damage_v3` scales that hit instead.
+- **PvP follows the combo.** `living_incoming_damage_v2` only hears mob victims, so a player's
+  hit on another player is scaled in `living_incoming_damage_v3` by the same step.
+- **Dodge roll**, server-authoritative: the client only asks (`better_combat:roll`), sending
+  the direction of the movement keys it holds; the server checks the player's state and
+  cooldown (4 s, 80 ticks), refuses in water, while riding, in the air or flying, opens 8 ticks
+  in which attacks, arrows and blasts miss them (`living_incoming_damage`, with a list of what
+  a roll must *not* dodge: fall, fire, lava, hunger, the void, `/kill`…), and answers. Only on
+  a grant does the client push its own player (`Host::push_player`, the prediction path) for
+  the granted ticks, play a sweep of air, and start its cooldown.
 - **Client half**: a rebindable key (default `R`, listed in Options > Mods), `/roll`, the combo
-  pips above the hotbar and a refusal line ("Roll cooling down", "Cannot roll in the air").
+  pips above the hotbar (from the first step), and a refusal line ("Roll cooling down",
+  "Cannot roll in the air", "Cannot roll in water", "Cannot roll while riding") that fades
+  after two seconds through the client tick hook.
 - **Protocol** (`api/src/net.rs`): version byte + exact length on every message, both halves
   validating what they receive; 15 unit tests over the rules and the wire format
   (`cargo test -p mod-better_combat`).
@@ -40,38 +54,25 @@ MIT (`LICENSE`); see `NOTICE.md`.
 
 ## Missing / not done
 
-- **The swing arc and its extra targets are not applied.** Upstream Better Combat hits every
-  entity in a wide arc; a Horizon trait mod can neither list the entities around a player
-  (`Host` has `entity(id)`, `server_players()`, but no query) nor deal damage of its own (no
-  `hurt` helper: `native_hurt_entity` is a game-internal function, not a mod helper). So the
-  arc, its range bonus and the sweep's reach exist only as tuning data and tested rules
-  (`Attack::arc`), not in play: a click still hits the one target the game picked, with the
-  combo's multiplier, and vanilla's own sword sweep is left untouched. This is the one big gap
-  and the reason the mod is not "Better Combat complete". It needs a hook point that lists
-  nearby entities and one that applies damage — both would be new `Host` helpers.
-- **No hunger cost, no water/vehicle refusal** on a roll: no helper reads a player's food level,
-  their vehicle or whether they are in water, so a roll works while swimming or riding and costs
-  nothing. The checks that do run: alive, not a spectator, on the ground, not flying, cooldown.
-- **PvP is not scaled.** `living_incoming_damage_v2` only fires for a player's melee, sweep and
-  spear hits on a mob; a hit on another player keeps vanilla's damage, so the combo's multiplier
-  applies to mobs only.
-- **The HUD is approximate.** A combo pip row is drawn only from the combo's second step (`index
-  0` doubles as the "combo is over" message that hides the pips), and the refusal line stays on
-  screen until the next granted roll instead of fading on its own: no client tick hook is used.
-- **Range and attack speed are the game's.** Weapon ranges (`range_bonus` upstream) and attack
-  cooldown cannot be read or changed through the API, so a claymore has no extra reach and a
-  dagger is not faster — only the combo's multipliers differ per weapon.
-- **The roll goes where the player looks.** A client mod cannot read the WASD state, so the
-  direction sent is empty and the server rolls along the player's yaw. The protocol already
-  carries a direction for the day a movement-input hook exists.
-- **The combo is shown, not animated.** No first-person swing animation or attack sound of its
-  own: `Attack::arc` is not drawn, and the client draws only the pips. No hand model change, no
-  attack indicator for the combo.
+- **No hunger cost** on a roll: the food level is readable (`Host::player_food`) but there is
+  no helper that sets it, so a roll costs nothing. The other checks do run: alive, not a
+  spectator, on the ground, not flying, not in water, not riding, cooldown.
+- **The sweep spares other players.** The arc skips player victims (a player's hit on a player
+  is only scaled, not swept); a true PvP sweep would need to know teams/allies, which no helper
+  exposes.
+- **Attack speed is the game's.** Weapon attack cooldown cannot be read or changed through the
+  API, so a dagger is not faster than a claymore — only the combo's multipliers, arc and reach
+  differ per weapon. Reach is this mod's own (2.6 to 4.2 blocks), not the game's click range.
+- **The combo is shown, not animated.** No first-person swing animation, hand model change or
+  attack indicator of its own: the client draws the pips, and a sweep is the game's particle
+  and sound.
 - **`/roll` is a client command**, so it works only through this mod's own chat handling. There
   is no server command, no permission and no config file.
+- **The HUD is plain.** Pips are a row of squares above the hotbar, the refusal line is a
+  single centred line; no icons, no cooldown bar.
 - **Not played.** Everything compiles against the real game sources and the rules are unit
-  tested, but nobody has fought a mob or rolled on a live client: the HUD, the key and the roll's
-  feel are unverified in game.
+  tested, but nobody has fought a mob or rolled on a live client: the HUD, the key, the arc's
+  feel and the roll's push are unverified in game.
 
 ## Files
 
@@ -82,7 +83,7 @@ mods/better_combat/
     horizon-mixin.toml              [mod] + [compatibility] + [api] path
     api/Cargo.toml                  the trait-mod package (horizon-client only)
     api/src/lib.rs                  Hooks: the wiring
-    api/src/server.rs               the combo, the damage step, the roll, its iframes
+    api/src/server.rs               the combo, the arc, the damage steps, the roll, its iframes
     api/src/client.rs               key, /roll, the grant's push, the pips
     api/src/net.rs                  the two halves' messages
     api/src/core.rs                 the rules, free of game types

@@ -8,11 +8,12 @@
 //!
 //! Hook points used (docs/native-mods.md, "Trait mods"): a server tick
 //! (`server_tick`), a player's attack on an entity (`attack_entity`), a melee
-//! hit on a mob before it lands (`living_incoming_damage_v2`), a hit on
-//! anything (`living_incoming_damage`), the two halves' messages
-//! (`net_from_client`, `net_from_server`), the client's key (`key`, `mods`),
-//! its own commands (`commands`, `command`) and the screen it draws on
-//! (`screen_render_post`).
+//! hit on a mob before it lands (`living_incoming_damage_v2`), a hit on a
+//! player (`living_incoming_damage_v3`), a hit on anything
+//! (`living_incoming_damage`), the two halves' messages (`net_from_client`,
+//! `net_from_server`), the client's key (`key`, `mods`), its own commands
+//! (`commands`, `command`), its ticks (`client_tick_post`) and the screen it
+//! draws on (`screen_render_post`).
 #![forbid(unsafe_code)]
 
 use horizon_client::mod_api::*;
@@ -50,8 +51,16 @@ impl Hooks for Combat {
         server::attack_entity(host, event)
     }
 
-    fn living_incoming_damage_v2(&self, host: &mut dyn Host, event: &mut LivingIncomingDamageV2Event<'_>) -> Flow {
+    fn living_incoming_damage_v2(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingIncomingDamageV2Event<'_>,
+    ) -> Flow {
         server::living_incoming_damage_v2(host, event)
+    }
+
+    fn living_incoming_damage_v3(&self, event: &mut LivingIncomingDamageV3Event<'_>) -> Flow {
+        server::living_incoming_damage_v3(event)
     }
 
     fn living_incoming_damage(&self, event: &mut LivingIncomingDamageEvent<'_>) -> Flow {
@@ -91,6 +100,11 @@ impl Hooks for Combat {
         } else {
             Flow::Continue
         }
+    }
+
+    fn client_tick_post(&self, host: &mut dyn Host, event: &mut ClientTickPostEvent) {
+        let _ = event;
+        self.client.tick(host);
     }
 
     fn screen_render_post(&self, host: &dyn Host, event: &mut ScreenRenderPostEvent<'_>) {

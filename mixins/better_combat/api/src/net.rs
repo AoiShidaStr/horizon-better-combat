@@ -3,7 +3,7 @@
 //! dropped. What a client sends is a player's own input: the server reads a
 //! request out of it, never a fact.
 
-pub const VERSION: u8 = 1;
+pub const VERSION: u8 = 2;
 
 /// Client to server: "I want to roll this way" (a horizontal direction; zero
 /// means "where I face").
@@ -39,12 +39,17 @@ pub fn decode_roll(data: &[u8]) -> Option<(f32, f32)> {
     Some((f32_at(data, 1)?, f32_at(data, 5)?))
 }
 
-/// A combo step: its index and the combo's length. `index` 0 with `len` 1 is
-/// also what a combo that ran out reports, which hides the client's pips.
+/// A combo step: its index and the combo's length. `len` 0 is a combo that ran
+/// out, which hides the client's pips.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ComboMsg {
     pub index: u8,
     pub len: u8,
+}
+
+impl ComboMsg {
+    /// The combo is over: the pips go away.
+    pub const HIDDEN: ComboMsg = ComboMsg { index: 0, len: 0 };
 }
 
 pub fn encode_combo(m: ComboMsg) -> Vec<u8> {
@@ -53,6 +58,7 @@ pub fn encode_combo(m: ComboMsg) -> Vec<u8> {
 
 pub fn decode_combo(data: &[u8]) -> Option<ComboMsg> {
     match data {
+        &[VERSION, index, len] if len == 0 && index == 0 => Some(ComboMsg::HIDDEN),
         &[VERSION, index, len] if len > 0 && index < len => Some(ComboMsg { index, len }),
         _ => None,
     }
@@ -86,14 +92,21 @@ pub fn decode_roll_ok(data: &[u8]) -> Option<RollOk> {
     }
     let (dx, dz, speed) = (f32_at(data, 1)?, f32_at(data, 5)?, f32_at(data, 9)?);
     let len = (dx * dx + dz * dz).sqrt();
-    if !(len.is_finite() && (0.9..=1.1).contains(&len)) || !(speed.is_finite() && (0.0..=2.0).contains(&speed)) {
+    if !(len.is_finite() && (0.9..=1.1).contains(&len))
+        || !(speed.is_finite() && (0.0..=2.0).contains(&speed))
+    {
         return None;
     }
     let ticks = data[13];
     if ticks > 40 {
         return None;
     }
-    Some(RollOk { dir: [dx, dz], speed, ticks, cooldown: u16_at(data, 14)? })
+    Some(RollOk {
+        dir: [dx, dz],
+        speed,
+        ticks,
+        cooldown: u16_at(data, 14)?,
+    })
 }
 
 /// A refused roll: the reason (`core::Deny`) and the ticks left to wait.
@@ -120,7 +133,10 @@ mod tests {
             let (id, name) = ch.split_once(':').unwrap();
             assert_eq!(id, "better_combat");
             assert!(!name.is_empty() && name.len() <= 64);
-            assert!(name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-/".contains(&b)));
+            assert!(
+                name.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-/".contains(&b))
+            );
         }
     }
 
@@ -142,21 +158,52 @@ mod tests {
     fn combo_round_trip_and_garbage() {
         let m = ComboMsg { index: 2, len: 3 };
         assert_eq!(decode_combo(&encode_combo(m)), Some(m));
-        assert_eq!(decode_combo(&encode_combo(ComboMsg { index: 0, len: 1 })), Some(ComboMsg { index: 0, len: 1 }));
+        // The first step shows itself, and a finished combo hides the pips.
+        assert_eq!(
+            decode_combo(&encode_combo(ComboMsg { index: 0, len: 1 })),
+            Some(ComboMsg { index: 0, len: 1 })
+        );
+        assert_eq!(
+            decode_combo(&encode_combo(ComboMsg::HIDDEN)),
+            Some(ComboMsg::HIDDEN)
+        );
         assert_eq!(decode_combo(&[VERSION, 3, 3]), None);
-        assert_eq!(decode_combo(&[VERSION, 0, 0]), None);
+        assert_eq!(decode_combo(&[VERSION, 1, 0]), None);
         assert_eq!(decode_combo(&[VERSION, 0]), None);
     }
 
     #[test]
     fn roll_ok_round_trip_and_garbage() {
-        let m = RollOk { dir: [0.6, 0.8], speed: 0.6, ticks: 6, cooldown: 80 };
+        let m = RollOk {
+            dir: [0.6, 0.8],
+            speed: 0.6,
+            ticks: 6,
+            cooldown: 80,
+        };
         assert_eq!(decode_roll_ok(&encode_roll_ok(m)), Some(m));
         // Not a unit direction, too fast, too long, NaN: dropped.
-        assert_eq!(decode_roll_ok(&encode_roll_ok(RollOk { dir: [3.0, 4.0], ..m })), None);
-        assert_eq!(decode_roll_ok(&encode_roll_ok(RollOk { speed: 9.0, ..m })), None);
-        assert_eq!(decode_roll_ok(&encode_roll_ok(RollOk { ticks: 200, ..m })), None);
-        assert_eq!(decode_roll_ok(&encode_roll_ok(RollOk { dir: [f32::NAN, 0.0], ..m })), None);
+        assert_eq!(
+            decode_roll_ok(&encode_roll_ok(RollOk {
+                dir: [3.0, 4.0],
+                ..m
+            })),
+            None
+        );
+        assert_eq!(
+            decode_roll_ok(&encode_roll_ok(RollOk { speed: 9.0, ..m })),
+            None
+        );
+        assert_eq!(
+            decode_roll_ok(&encode_roll_ok(RollOk { ticks: 200, ..m })),
+            None
+        );
+        assert_eq!(
+            decode_roll_ok(&encode_roll_ok(RollOk {
+                dir: [f32::NAN, 0.0],
+                ..m
+            })),
+            None
+        );
         assert_eq!(decode_roll_ok(&encode_roll_ok(m)[..15]), None);
     }
 
