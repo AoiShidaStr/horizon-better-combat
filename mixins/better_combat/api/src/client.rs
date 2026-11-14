@@ -143,26 +143,25 @@ impl Client {
 
     /// One client tick: fade the refusal line and keep the roll moving.
     pub fn tick(&self, host: &mut dyn Host) {
-        let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((text, left)) = view.notice {
-            view.notice = (left > 1).then_some((text, left - 1));
-        }
-        let Some(roll) = view.roll else { return };
-        if roll.left == 0 || roll.ticks == 0 {
-            view.roll = None;
-            return;
-        }
-        // Each tick is a little weaker, so the roll lands rather than slides.
-        let ease = 0.4 + 0.6 * f32::from(roll.left) / f32::from(roll.ticks);
-        push(host, roll.dir, roll.speed * ease, roll.left, roll.ticks);
-        view.roll = if roll.left > 1 {
-            Some(Roll {
+        let next = {
+            let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((text, left)) = view.notice {
+                view.notice = (left > 1).then_some((text, left - 1));
+            }
+            let Some(roll) = view.roll else { return };
+            if roll.left == 0 || roll.ticks == 0 {
+                view.roll = None;
+                return;
+            }
+            // Each tick is a little weaker, so the roll lands rather than slides.
+            let ease = 0.4 + 0.6 * f32::from(roll.left) / f32::from(roll.ticks);
+            view.roll = (roll.left > 1).then_some(Roll {
                 left: roll.left - 1,
                 ..roll
-            })
-        } else {
-            None
+            });
+            (roll, roll.speed * ease)
         };
+        push(host, next.0.dir, next.1);
     }
 
     /// The pips above the hotbar: one per combo step, the current one gold.
@@ -202,14 +201,8 @@ impl Client {
 }
 
 /// Push the local player along the granted direction for one tick.
-fn push(host: &mut dyn Host, dir: [f32; 2], speed: f32, left: u8, ticks: u8) {
-    let scale = if ticks == 0 {
-        speed
-    } else {
-        // The first push is the strongest, then it eases out with `left`.
-        speed * (0.4 + 0.6 * f32::from(left) / f32::from(ticks))
-    };
-    host.push_player([dir[0] * scale, 0.0, dir[1] * scale]);
+fn push(host: &mut dyn Host, dir: [f32; 2], speed: f32) {
+    host.push_player([dir[0] * speed, 0.0, dir[1] * speed]);
 }
 
 /// The horizontal direction the movement keys ask for, in world axes.
